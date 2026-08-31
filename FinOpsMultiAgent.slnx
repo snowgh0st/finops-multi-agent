@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/FinOps.Core/FinOps.Core.csproj" />
-    <Project Path="src/FinOps.Orchestrator/FinOps.Orchestrator.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/FinOps.Tests/FinOps.Tests.csproj" />
-  </Folder>
-</Solution>
