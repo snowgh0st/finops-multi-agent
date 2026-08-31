@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="FinOps.Api/FinOps.Api.csproj" />
+  <Project Path="FinOps.Core/FinOps.Core.csproj" />
+  <Project Path="FinOps.Domain/FinOps.Domain.csproj" />
+  <Project Path="FinOps.Infrastructure/FinOps.Infrastructure.csproj" />
+</Solution>
