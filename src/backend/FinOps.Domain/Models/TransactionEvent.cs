@@ -1,13 +1,13 @@
-namespace FinOps.Domain;
+namespace FinOps.Domain.Models;
 
 public record TransactionEvent(
     string TransactionId,
     string AccountId,
     decimal Amount,
-    string Currency,
-    string MerchantCategory,
+    string Merchant,
+    string Category,
     string Location,
     DateTime Timestamp,
-    double RiskScore = 0.0,
-    bool IsFlagged = false
+    double AnomalyScore = 0.0,
+    bool IsHighRisk = false
 );

@@ -1,12 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { RiskTelemetry } from './risk-telemetry';
+import { RiskTelemetryService } from './risk-telemetry.service';
 
-describe('RiskTelemetry', () => {
-  let service: RiskTelemetry;
+describe('RiskTelemetryService', () => {
+  let service: RiskTelemetryService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({});
-    service = TestBed.inject(RiskTelemetry);
+    service = TestBed.inject(RiskTelemetryService);
   });
 
   it('should be created', () => {

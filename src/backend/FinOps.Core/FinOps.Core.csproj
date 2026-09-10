@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.4" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.14.0" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.80.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.Amazon" Version="1.80.0-alpha" />
   </ItemGroup>
 
