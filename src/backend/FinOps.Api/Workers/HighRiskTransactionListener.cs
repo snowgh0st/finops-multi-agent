@@ -1,103 +1,107 @@
+namespace FinOps.Api.Workers;
+
 using FinOps.Api.Hubs;
 using FinOps.Domain.Models;
 using FinOps.Infrastructure.Services;
 using Microsoft.AspNetCore.SignalR;
-
-namespace FinOps.Api.Workers;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 public class HighRiskTransactionListener : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<RiskHub> _hubContext;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<HighRiskTransactionListener> _logger;
-    
-    // Risk threshold to trigger an AI investigation
-    private const double HighRiskThreshold = 0.85;
 
     public HighRiskTransactionListener(
-        IServiceProvider serviceProvider,
         IHubContext<RiskHub> hubContext,
+        IServiceProvider serviceProvider,
         ILogger<HighRiskTransactionListener> logger)
     {
-        _serviceProvider = serviceProvider;
         _hubContext = hubContext;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("High-Risk Transaction Agent Listener initialized.");
+        _logger.LogInformation(".NET HighRiskTransactionListener background worker started.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // 1. Simulate reading processed evaluated transactions from channel / queue
-                var transaction = await GetNextEvaluatedTransactionAsync(stoppingToken);
+                // 1. Generate randomized sample transaction event
+                var txId = $"TX-{Guid.NewGuid().ToString()[..8].ToUpper()}";
+                var accountId = $"ACC-{Random.Shared.Next(1000, 9999)}";
+                var amount = Math.Round((decimal)(Random.Shared.NextDouble() * 145000 + 5000), 2);
+                var anomalyScore = Math.Round(Random.Shared.NextDouble() * 0.5 + 0.5, 2); // 0.50 to 1.00
 
-                // 2. Check if transaction breaches anomaly threshold
-                if (transaction != null && transaction.AnomalyScore >= HighRiskThreshold)
+                var sampleEvent = CreateSampleEvent(txId, accountId, amount, anomalyScore);
+
+                // 2. Emit alert payload over SignalR to Angular dashboard
+                await _hubContext.Clients.All.SendAsync(
+                    "ReceiveHighRiskAlert",
+                    sampleEvent,
+                    cancellationToken: stoppingToken
+                );
+
+                _logger.LogInformation("Sent transaction alert over SignalR: {Id} | Risk: {Score}", 
+                    sampleEvent.TransactionId, 
+                    sampleEvent.AnomalyScore);
+
+                // 3. Trigger autonomous SAR investigation pipeline only for extreme risk anomalies (>= 0.92)
+                if (sampleEvent.AnomalyScore >= 0.92)
                 {
-                    _logger.LogWarning(
-                        "High risk detected for Tx {TransactionId} (Score: {Score}). Triggering AI Agent...",
-                        transaction.TransactionId,
-                        transaction.AnomalyScore);
+                    _logger.LogWarning("Extreme risk detected ({Score}). Initiating Semantic Kernel SAR generation...", sampleEvent.AnomalyScore);
 
-                    // Create a scoped service lifetime to resolve scoped dependencies
                     using var scope = _serviceProvider.CreateScope();
                     var sarService = scope.ServiceProvider.GetRequiredService<SarGeneratorService>();
 
-                    // 3. Trigger Semantic Kernel Multi-Agent Investigation
-                    string sarReportText = await sarService.InvestigateAndGenerateSarAsync(
-                        transaction.TransactionId,
-                        transaction.AccountId,
-                        transaction.Amount,
-                        transaction.AnomalyScore
+                    string sarReport = await sarService.InvestigateAndGenerateSarAsync(
+                        sampleEvent.TransactionId,
+                        sampleEvent.AccountId,
+                        (double)sampleEvent.Amount,
+                        sampleEvent.AnomalyScore
                     );
 
-                    var sarPayload = new
-                    {
-                        SarId = Guid.NewGuid().ToString(),
-                        TransactionId = transaction.TransactionId,
-                        AccountId = transaction.AccountId,
-                        Amount = transaction.Amount,
-                        RiskScore = transaction.AnomalyScore,
-                        ReportBody = sarReportText,
-                        GeneratedAt = DateTime.UtcNow
-                    };
-
-                    // 4. Broadcast live SAR Alert to connected Angular dashboard via SignalR
-                    await _hubContext.Clients.All.SendAsync("ReceiveSarReport", sarPayload, stoppingToken);
+                    await _hubContext.Clients.All.SendAsync(
+                        "ReceiveSarReport",
+                        sarReport,
+                        cancellationToken: stoppingToken
+                    );
                 }
-            }
-            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogError(ex, "Error processing high-risk transaction event.");
-            }
 
-            // Polling/delay interval between queue reads
-            await Task.Delay(2000, stoppingToken);
+                await Task.Delay(4000, stoppingToken);
+                
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in HighRiskTransactionListener loop.");
+                await Task.Delay(5000, stoppingToken);
+            }
         }
+
+        _logger.LogInformation(".NET HighRiskTransactionListener background worker stopped.");
     }
 
-    private static async Task<TransactionEvent?> GetNextEvaluatedTransactionAsync(CancellationToken cancellationToken)
+    private static TransactionEvent CreateSampleEvent(string id, string account, decimal amount, double anomalyScore)
     {
-        await Task.Delay(100, cancellationToken);
-        
-        // Mocking high-risk event feed for demonstration
-        var random = new Random();
-        double score = Math.Round(random.NextDouble(), 2);
-
-        // Inject high risk score periodically
-        if (score > 0.70) score = 0.92; 
-
-        return new TransactionEvent
-        {
-            TransactionId = $"TX-{random.Next(100000, 999999)}",
-            AccountId = $"ACC-{random.Next(1000, 9999)}",
-            Amount = random.Next(5000, 50000),
-            AnomalyScore = score,
-            Timestamp = DateTime.UtcNow
-        };
+        return new TransactionEvent(
+            TransactionId: id,
+            AccountId: account,
+            Amount: amount,
+            Merchant: "High-Risk External Transfer",
+            Category: "Wire Transfer",
+            Location: "Cayman Islands, KY",
+            Timestamp: DateTime.UtcNow,
+            AnomalyScore: anomalyScore,
+            IsHighRisk: anomalyScore >= 0.75
+        );
     }
 }

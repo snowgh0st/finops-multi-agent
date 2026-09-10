@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using Microsoft.SemanticKernel;
 
-namespace FinOps.Core;
+namespace FinOps.Core.Plugins;
 
 public class FraudInvestigationPlugin
 {

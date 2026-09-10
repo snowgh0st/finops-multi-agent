@@ -1,14 +1,11 @@
-using FinOps.Api;
+using FinOps.Api.Hubs;
+using FinOps.Api.Workers;
+using FinOps.Infrastructure.Services;
+using Microsoft.SemanticKernel;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register SignalR & Background Simulator
-builder.Services.AddSignalR();
-builder.Services.AddHostedService<TransactionSimulator>();
-builder.Services.AddScoped<SarGeneratorService>();
-builder.Services.AddHostedService<HighRiskTransactionListener>();
-
-// 2. Configure CORS for Angular (http://localhost:4200)
+// 1. Configure CORS for Angular Frontend
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
@@ -16,17 +13,48 @@ builder.Services.AddCors(options =>
         policy.WithOrigins("http://localhost:4200", "https://localhost:4200")
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials(); // Required for SignalR WebSockets & HTTP Negotiation
     });
 });
 
+// 2. Configure SignalR with explicit camelCase JSON serialization
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.PropertyNamingPolicy = 
+            System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
+
+// 3. Register Semantic Kernel Services
+builder.Services.AddTransient<Kernel>(sp =>
+{
+    var kernelBuilder = Kernel.CreateBuilder();
+    string apiKey = builder.Configuration["OpenAI:ApiKey"] ?? "";
+    string modelId = builder.Configuration["OpenAI:ModelId"] ?? "gpt-4o";
+
+    var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+    };
+    var customHttpClient = new HttpClient(handler);
+
+    kernelBuilder.AddOpenAIChatCompletion(modelId, apiKey, httpClient: customHttpClient);
+    return kernelBuilder.Build();
+});
+
+builder.Services.AddTransient<SarGeneratorService>();
+builder.Services.AddHostedService<HighRiskTransactionListener>();
+
 var app = builder.Build();
 
-// 3. Enable CORS Middleware
+app.UseRouting();
+
+// CORS must sit between UseRouting and endpoint mappings
 app.UseCors("AllowAngular");
 
-// 4. Map Endpoints
+// Mapped route now matches Angular's http://localhost:5000/hubs/risk
 app.MapHub<RiskHub>("/hubs/risk");
-app.MapGet("/", () => "FinOps Multi-Agent API is Running");
+
+app.MapGet("/", () => "FinOps Risk Engine API Running");
 
 app.Run();

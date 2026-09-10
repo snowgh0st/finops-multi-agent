@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\FinOps.Domain\FinOps.Domain.csproj" />
     <ProjectReference Include="..\FinOps.Infrastructure\FinOps.Infrastructure.csproj" />
     <ProjectReference Include="..\FinOps.Core\FinOps.Core.csproj" />
   </ItemGroup>
