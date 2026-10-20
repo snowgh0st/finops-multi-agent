@@ -17,4 +17,10 @@
     <ProjectReference Include="..\FinOps.Core\FinOps.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Models\fraud_model.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

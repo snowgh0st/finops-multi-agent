@@ -2,6 +2,8 @@ namespace FinOps.Api.Workers;
 
 using FinOps.Api.Hubs;
 using FinOps.Domain.Models;
+using FinOps.Infrastructure.Cache;
+using FinOps.Infrastructure.Evaluators;
 using FinOps.Infrastructure.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,49 +34,80 @@ public class HighRiskTransactionListener : BackgroundService
         {
             try
             {
+                using var scope = _serviceProvider.CreateScope();
+                var featureStore = scope.ServiceProvider.GetRequiredService<TransactionFeatureStore>();
+                var evaluator = scope.ServiceProvider.GetRequiredService<FraudModelEvaluator>();
+                var sarService = scope.ServiceProvider.GetRequiredService<SarGeneratorService>();
+
                 // 1. Generate randomized sample transaction event
                 var txId = $"TX-{Guid.NewGuid().ToString()[..8].ToUpper()}";
                 var accountId = $"ACC-{Random.Shared.Next(1000, 9999)}";
                 var amount = Math.Round((decimal)(Random.Shared.NextDouble() * 145000 + 5000), 2);
-                var anomalyScore = Math.Round(Random.Shared.NextDouble() * 0.5 + 0.5, 2); // 0.50 to 1.00
+                bool isGeoAnomaly = Random.Shared.NextDouble() > 0.7; // 30% chance of geo-anomaly
+
+                // 2. Track transaction in Redis Feature Store
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                await featureStore.TrackTransactionAsync(accountId, (double)amount, timestamp);
+
+                // 3. Fetch real-time sliding-window metrics from Redis
+                var (count60s, total60s) = await featureStore.GetWindowMetricsAsync(accountId, windowSeconds: 60);
+                var (count1h, total1h) = await featureStore.GetWindowMetricsAsync(accountId, windowSeconds: 3600);
+
+                // 4. Score transaction using local ONNX model evaluator (< 1 ms latency)
+                double anomalyScore = evaluator.PredictRiskScore(
+                    amount: (double)amount,
+                    count60s: count60s,
+                    total60s: total60s,
+                    count1h: count1h,
+                    total1h: total1h,
+                    isGeoAnomaly: isGeoAnomaly
+                );
+
+                anomalyScore = Math.Round(anomalyScore, 2);
 
                 var sampleEvent = CreateSampleEvent(txId, accountId, amount, anomalyScore);
 
-                // 2. Emit alert payload over SignalR to Angular dashboard
+                // 5. Emit alert payload over SignalR to Angular dashboard
                 await _hubContext.Clients.All.SendAsync(
                     "ReceiveHighRiskAlert",
                     sampleEvent,
                     cancellationToken: stoppingToken
                 );
 
-                _logger.LogInformation("Sent transaction alert over SignalR: {Id} | Risk: {Score}", 
+                _logger.LogInformation("Sent transaction alert over SignalR: {Id} | Score: {Score} | Redis 60s Count: {Count}", 
                     sampleEvent.TransactionId, 
-                    sampleEvent.AnomalyScore);
+                    sampleEvent.AnomalyScore,
+                    count60s);
 
-                // 3. Trigger autonomous SAR investigation pipeline only for extreme risk anomalies (>= 0.92)
-                if (sampleEvent.AnomalyScore >= 0.92)
+                // 6. Trigger autonomous SAR investigation pipeline for extreme risk anomalies (>= 0.85)
+                if (sampleEvent.AnomalyScore >= 0.85)
                 {
                     _logger.LogWarning("Extreme risk detected ({Score}). Initiating Semantic Kernel SAR generation...", sampleEvent.AnomalyScore);
-
-                    using var scope = _serviceProvider.CreateScope();
-                    var sarService = scope.ServiceProvider.GetRequiredService<SarGeneratorService>();
 
                     string sarReport = await sarService.InvestigateAndGenerateSarAsync(
                         sampleEvent.TransactionId,
                         sampleEvent.AccountId,
                         (double)sampleEvent.Amount,
-                        sampleEvent.AnomalyScore
+                        sampleEvent.AnomalyScore,
+                        sampleEvent.Location
                     );
 
                     await _hubContext.Clients.All.SendAsync(
                         "ReceiveSarReport",
-                        sarReport,
+                        new
+                        {
+                            transactionId = sampleEvent.TransactionId,
+                            accountId = sampleEvent.AccountId,
+                            amount = sampleEvent.Amount,
+                            riskScore = sampleEvent.AnomalyScore,
+                            generatedSarText = sarReport,
+                            timestamp = DateTime.UtcNow.ToString("o")
+                        },
                         cancellationToken: stoppingToken
                     );
                 }
 
                 await Task.Delay(4000, stoppingToken);
-                
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

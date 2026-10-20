@@ -2,6 +2,7 @@ using FinOps.Api.Hubs;
 using FinOps.Api.Workers;
 using FinOps.Infrastructure.Cache;
 using FinOps.Infrastructure.Services;
+using FinOps.Infrastructure.Evaluators;
 using Microsoft.SemanticKernel;
 using StackExchange.Redis;
 
@@ -38,7 +39,16 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 // Register the Feature Store for real-time velocity and volume aggregation tracking
 builder.Services.AddScoped<TransactionFeatureStore>();
 
-// 4. Register Semantic Kernel Services
+// 4. Register ONNX Model Evaluator as Singleton
+builder.Services.AddSingleton<FraudModelEvaluator>(sp =>
+{
+    var env = sp.GetRequiredService<IWebHostEnvironment>();
+    string modelPath = Path.Combine(env.ContentRootPath, "Models", "fraud_model.onnx");
+    
+    return new FraudModelEvaluator(modelPath);
+});
+
+// 5. Register Semantic Kernel Services
 builder.Services.AddTransient<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
@@ -55,7 +65,7 @@ builder.Services.AddTransient<Kernel>(sp =>
     return kernelBuilder.Build();
 });
 
-// 5. Register Application & Background Services
+// 6. Register Application & Background Services
 builder.Services.AddTransient<SarGeneratorService>();
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
