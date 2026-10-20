@@ -1,7 +1,9 @@
 using FinOps.Api.Hubs;
 using FinOps.Api.Workers;
+using FinOps.Infrastructure.Cache;
 using FinOps.Infrastructure.Services;
 using Microsoft.SemanticKernel;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +27,18 @@ builder.Services.AddSignalR()
             System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 
-// 3. Register Semantic Kernel Services
+// 3. Configure Redis Connection Multiplexer & Feature Store
+// Connects to local Redis instance (defaulting to localhost:6379 if connection string is omitted in appsettings.json)
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    string redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(redisConnectionString);
+});
+
+// Register the Feature Store for real-time velocity and volume aggregation tracking
+builder.Services.AddScoped<TransactionFeatureStore>();
+
+// 4. Register Semantic Kernel Services
 builder.Services.AddTransient<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
@@ -42,6 +55,7 @@ builder.Services.AddTransient<Kernel>(sp =>
     return kernelBuilder.Build();
 });
 
+// 5. Register Application & Background Services
 builder.Services.AddTransient<SarGeneratorService>();
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
