@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: finops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - finops-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  finops-api:
+    build:
+      context: ./src/backend
+      dockerfile: FinOps.Api/Dockerfile
+    container_name: finops-risk-api
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Redis=redis:6379
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - OpenAI__ModelId=gpt-4o
+    volumes:
+      - sqlite-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - finops-net
+
+volumes:
+  redis-data:
+  sqlite-data: # Docker manages this externally, just like redis-data
+
+networks:
+  finops-net:
+    driver: bridge
