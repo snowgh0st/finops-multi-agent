@@ -1,8 +1,9 @@
-using StackExchange.Redis;
-
 namespace FinOps.Infrastructure.Cache;
 
-public class TransactionFeatureStore
+using FinOps.Core.Interfaces;
+using StackExchange.Redis;
+
+public class TransactionFeatureStore : ITransactionFeatureStore
 {
     private readonly IDatabase _redis;
 
@@ -23,7 +24,7 @@ public class TransactionFeatureStore
         await _redis.SortedSetRemoveRangeByScoreAsync(key, 0, cutoff);
     }
 
-    public async Task<(int count, double totalAmount)> GetWindowMetricsAsync(string accountId, int windowSeconds)
+    public async Task<(int Count, double Total)> GetWindowMetricsAsync(string accountId, int windowSeconds)
     {
         var key = $"account:{accountId}:velocity";
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

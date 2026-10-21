@@ -1,9 +1,15 @@
 using FinOps.Api.Hubs;
 using FinOps.Api.Workers;
+using FinOps.Core.Interfaces;
 using FinOps.Infrastructure.Cache;
-using FinOps.Infrastructure.Services;
 using FinOps.Infrastructure.Evaluators;
+using FinOps.Infrastructure.Filters;
+using FinOps.Infrastructure.Persistence;
+using FinOps.Infrastructure.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,18 +34,30 @@ builder.Services.AddSignalR()
             System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 
-// 3. Configure Redis Connection Multiplexer & Feature Store
-// Connects to local Redis instance (defaulting to localhost:6379 if connection string is omitted in appsettings.json)
+// 3. Configure Redis Connection Multiplexer & Feature Store Interface
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
     string redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
     return ConnectionMultiplexer.Connect(redisConnectionString);
 });
+builder.Services.AddScoped<ITransactionFeatureStore, TransactionFeatureStore>();
 
-// Register the Feature Store for real-time velocity and volume aggregation tracking
-builder.Services.AddScoped<TransactionFeatureStore>();
+// 4. Configure SQLite for Compliance Audit Logging
+string dbPath = Path.Combine(builder.Environment.ContentRootPath, "compliance_audit.db");
+builder.Services.AddDbContext<AuditDbContext>(options =>
+    options.UseSqlite($"Data Source={dbPath}"));
 
-// 4. Register ONNX Model Evaluator as Singleton
+// 5. Configure OpenTelemetry Tracing for Audit & Telemetry
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracerProviderBuilder =>
+    {
+        tracerProviderBuilder
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("FinOps.RiskEngine.Api"))
+            .AddSource("FinOps.Compliance.AuditTracing")
+            .AddConsoleExporter();
+    });
+
+// 6. Register ONNX Model Evaluator as Singleton (< 1 ms local inference)
 builder.Services.AddSingleton<FraudModelEvaluator>(sp =>
 {
     var env = sp.GetRequiredService<IWebHostEnvironment>();
@@ -48,7 +66,9 @@ builder.Services.AddSingleton<FraudModelEvaluator>(sp =>
     return new FraudModelEvaluator(modelPath);
 });
 
-// 5. Register Semantic Kernel Services
+// 7. Register Semantic Kernel & Wire the Audit Function Filter
+builder.Services.AddSingleton<IAutoFunctionInvocationFilter, AuditFunctionFilter>();
+
 builder.Services.AddTransient<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
@@ -62,21 +82,56 @@ builder.Services.AddTransient<Kernel>(sp =>
     var customHttpClient = new HttpClient(handler);
 
     kernelBuilder.AddOpenAIChatCompletion(modelId, apiKey, httpClient: customHttpClient);
-    return kernelBuilder.Build();
+
+    // Register filter into kernel's dependency injection container
+    var auditFilter = sp.GetRequiredService<IAutoFunctionInvocationFilter>();
+    kernelBuilder.Services.AddSingleton(auditFilter);
+
+    var kernel = kernelBuilder.Build();
+    
+    // Attach the filter to the Kernel instance
+    kernel.AutoFunctionInvocationFilters.Add(auditFilter);
+
+    return kernel;
 });
 
-// 6. Register Application & Background Services
+// 8. Register Application & Background Services
 builder.Services.AddTransient<SarGeneratorService>();
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
 var app = builder.Build();
+
+// 9. Initialize/Verify SQLite Database on Boot
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    try
+    {
+        // Force EF Core to create tables if they don't exist
+        var created = await dbContext.Database.EnsureCreatedAsync();
+        if (created)
+        {
+            logger.LogInformation("Compliance Audit SQLite database and tables successfully created at: {Path}", dbPath);
+        }
+        else
+        {
+            logger.LogInformation("Compliance Audit SQLite database already exists at: {Path}", dbPath);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "An error occurred while initializing the Compliance Audit database.");
+    }
+}
 
 app.UseRouting();
 
 // CORS must sit between UseRouting and endpoint mappings
 app.UseCors("AllowAngular");
 
-// Mapped route now matches Angular's http://localhost:5000/hubs/risk
+// Mapped route matches Angular's SignalR connection hub
 app.MapHub<RiskHub>("/hubs/risk");
 
 app.MapGet("/", () => "FinOps Risk Engine API Running");

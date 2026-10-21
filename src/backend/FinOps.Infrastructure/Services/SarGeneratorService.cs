@@ -1,5 +1,6 @@
 using FinOps.Core.Plugins;
 using FinOps.Infrastructure.Cache;
+using FinOps.Core.Interfaces;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -8,11 +9,13 @@ namespace FinOps.Infrastructure.Services;
 public class SarGeneratorService
 {
     private readonly Kernel _kernel;
+    private readonly ITransactionFeatureStore _featureStore; // Update type to interface
 
     // Inject Kernel and TransactionFeatureStore via Dependency Injection
-    public SarGeneratorService(Kernel kernel, TransactionFeatureStore featureStore)
+    public SarGeneratorService(Kernel kernel, ITransactionFeatureStore featureStore)
     {
         _kernel = kernel;
+        _featureStore = featureStore;
 
         // Instantiate FraudInvestigationPlugin with the feature store and add it to the Kernel
         var plugin = new FraudInvestigationPlugin(featureStore);

@@ -1,15 +1,15 @@
-using System.ComponentModel;
-using FinOps.Infrastructure.Cache;
-using Microsoft.SemanticKernel;
-
 namespace FinOps.Core.Plugins;
+
+using System.ComponentModel;
+using FinOps.Core.Interfaces;
+using Microsoft.SemanticKernel;
 
 public class FraudInvestigationPlugin
 {
-    private readonly TransactionFeatureStore _featureStore;
+    private readonly ITransactionFeatureStore _featureStore;
 
-    // Inject the Redis Feature Store into the plugin
-    public FraudInvestigationPlugin(TransactionFeatureStore featureStore)
+    // Inject the Redis Feature Store interface into the plugin
+    public FraudInvestigationPlugin(ITransactionFeatureStore featureStore)
     {
         _featureStore = featureStore;
     }
@@ -36,7 +36,7 @@ public class FraudInvestigationPlugin
         [Description("The account ID")] string accountId,
         [Description("Current IP address or geo-location")] string currentLocation)
     {
-        // Simulated geo-profile lookup (can be backed by DynamoDB or PostgreSQL)
+        // Simulated geo-profile lookup
         return $"Account '{accountId}' primary registered location is US-East (New York). Current transaction originating from unusual location/IP near: {currentLocation}.";
     }
 }

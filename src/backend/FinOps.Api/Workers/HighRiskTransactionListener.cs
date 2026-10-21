@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using FinOps.Core.Interfaces;
 
 public class HighRiskTransactionListener : BackgroundService
 {
@@ -35,7 +36,7 @@ public class HighRiskTransactionListener : BackgroundService
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var featureStore = scope.ServiceProvider.GetRequiredService<TransactionFeatureStore>();
+                var featureStore = scope.ServiceProvider.GetRequiredService<ITransactionFeatureStore>();
                 var evaluator = scope.ServiceProvider.GetRequiredService<FraudModelEvaluator>();
                 var sarService = scope.ServiceProvider.GetRequiredService<SarGeneratorService>();
 
