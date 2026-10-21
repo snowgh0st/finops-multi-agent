@@ -2,14 +2,13 @@ namespace FinOps.Api.Workers;
 
 using FinOps.Api.Hubs;
 using FinOps.Domain.Models;
+using FinOps.Infrastructure.Agents;
 using FinOps.Infrastructure.Cache;
 using FinOps.Infrastructure.Evaluators;
-using FinOps.Infrastructure.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using FinOps.Core.Interfaces;
 
 public class HighRiskTransactionListener : BackgroundService
 {
@@ -36,9 +35,9 @@ public class HighRiskTransactionListener : BackgroundService
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var featureStore = scope.ServiceProvider.GetRequiredService<ITransactionFeatureStore>();
+                var featureStore = scope.ServiceProvider.GetRequiredService<TransactionFeatureStore>();
                 var evaluator = scope.ServiceProvider.GetRequiredService<FraudModelEvaluator>();
-                var sarService = scope.ServiceProvider.GetRequiredService<SarGeneratorService>();
+                var multiAgentCoordinator = scope.ServiceProvider.GetRequiredService<MultiAgentRiskCoordinator>();
 
                 // 1. Generate randomized sample transaction event
                 var txId = $"TX-{Guid.NewGuid().ToString()[..8].ToUpper()}";
@@ -80,12 +79,12 @@ public class HighRiskTransactionListener : BackgroundService
                     sampleEvent.AnomalyScore,
                     count60s);
 
-                // 6. Trigger autonomous SAR investigation pipeline for extreme risk anomalies (>= 0.85)
+                // 6. Trigger Multi-Agent Risk Coordinator pipeline for extreme risk anomalies (>= 0.85)
                 if (sampleEvent.AnomalyScore >= 0.85)
                 {
-                    _logger.LogWarning("Extreme risk detected ({Score}). Initiating Semantic Kernel SAR generation...", sampleEvent.AnomalyScore);
+                    _logger.LogWarning("Extreme risk detected ({Score}). Initiating Multi-Agent Risk Coordinator investigation...", sampleEvent.AnomalyScore);
 
-                    string sarReport = await sarService.InvestigateAndGenerateSarAsync(
+                    string sarReport = await multiAgentCoordinator.ExecuteMultiAgentInvestigationAsync(
                         sampleEvent.TransactionId,
                         sampleEvent.AccountId,
                         (double)sampleEvent.Amount,

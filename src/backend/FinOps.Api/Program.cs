@@ -6,6 +6,7 @@ using FinOps.Infrastructure.Evaluators;
 using FinOps.Infrastructure.Filters;
 using FinOps.Infrastructure.Persistence;
 using FinOps.Infrastructure.Services;
+using FinOps.Infrastructure.Agents;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
 using OpenTelemetry.Resources;
@@ -40,7 +41,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     string redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
     return ConnectionMultiplexer.Connect(redisConnectionString);
 });
-builder.Services.AddScoped<ITransactionFeatureStore, TransactionFeatureStore>();
+// Register both the concrete class and the interface so either injection approach works
+builder.Services.AddScoped<TransactionFeatureStore>();
+builder.Services.AddScoped<ITransactionFeatureStore>(sp => sp.GetRequiredService<TransactionFeatureStore>());
 
 // 4. Configure SQLite for Compliance Audit Logging
 string dbPath = Path.Combine(builder.Environment.ContentRootPath, "compliance_audit.db");
@@ -99,9 +102,12 @@ builder.Services.AddTransient<Kernel>(sp =>
 builder.Services.AddTransient<SarGeneratorService>();
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
+// 9. Register Multi-Agent Coordinator Service (MUST be before builder.Build())
+builder.Services.AddTransient<MultiAgentRiskCoordinator>();
+
 var app = builder.Build();
 
-// 9. Initialize/Verify SQLite Database on Boot
+// 10. Initialize/Verify SQLite Database on Boot
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
