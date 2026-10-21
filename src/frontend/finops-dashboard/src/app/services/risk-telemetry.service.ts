@@ -44,7 +44,7 @@ export class RiskTelemetryService {
   this.connectionState.set('Connecting');
 
   this.hubConnection = new signalR.HubConnectionBuilder()
-    .withUrl('http://localhost:5114/hubs/risk', {
+    .withUrl('http://localhost:5001/hubs/risk', {
       skipNegotiation: true,
       transport: signalR.HttpTransportType.WebSockets
     })
