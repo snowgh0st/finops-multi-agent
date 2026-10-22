@@ -12,6 +12,9 @@ using Microsoft.SemanticKernel;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StackExchange.Redis;
+using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.DataModel;
+using Amazon.DynamoDBv2.Model;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,7 +44,6 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     string redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
     return ConnectionMultiplexer.Connect(redisConnectionString);
 });
-// Register both the concrete class and the interface so either injection approach works
 builder.Services.AddScoped<TransactionFeatureStore>();
 builder.Services.AddScoped<ITransactionFeatureStore>(sp => sp.GetRequiredService<TransactionFeatureStore>());
 
@@ -86,13 +88,10 @@ builder.Services.AddTransient<Kernel>(sp =>
 
     kernelBuilder.AddOpenAIChatCompletion(modelId, apiKey, httpClient: customHttpClient);
 
-    // Register filter into kernel's dependency injection container
     var auditFilter = sp.GetRequiredService<IAutoFunctionInvocationFilter>();
     kernelBuilder.Services.AddSingleton(auditFilter);
 
     var kernel = kernelBuilder.Build();
-    
-    // Attach the filter to the Kernel instance
     kernel.AutoFunctionInvocationFilters.Add(auditFilter);
 
     return kernel;
@@ -102,20 +101,35 @@ builder.Services.AddTransient<Kernel>(sp =>
 builder.Services.AddTransient<SarGeneratorService>();
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
-// 9. Register Multi-Agent Coordinator Service (MUST be before builder.Build())
+// 9. Register Multi-Agent Coordinator Service
 builder.Services.AddTransient<MultiAgentRiskCoordinator>();
+
+// 10. Register Amazon DynamoDB client & Feature Store (MUST be before builder.Build())
+builder.Services.AddSingleton<IAmazonDynamoDB>(sp =>
+{
+    var config = new AmazonDynamoDBConfig
+    {
+        ServiceURL = "http://dynamodb-local:8000",
+        AuthenticationRegion = "us-east-1"
+    };
+    return new AmazonDynamoDBClient("local", "local", config);
+});
+
+builder.Services.AddScoped<IDynamoDBContext, DynamoDBContext>();
+builder.Services.AddScoped<IFeatureStore, DynamoDbFeatureStore>();
 
 var app = builder.Build();
 
-// 10. Initialize/Verify SQLite Database on Boot
+// 11. Initialize/Verify SQLite & DynamoDB Databases on Boot
 using (var scope = app.Services.CreateScope())
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
 
+    // SQLite Audit DB Initialization
     try
     {
-        // Force EF Core to create tables if they don't exist
+        var dbContext = services.GetRequiredService<AuditDbContext>();
         var created = await dbContext.Database.EnsureCreatedAsync();
         if (created)
         {
@@ -129,6 +143,36 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         logger.LogError(ex, "An error occurred while initializing the Compliance Audit database.");
+    }
+
+    // DynamoDB Table Initialization
+    try
+    {
+        var dynamoClient = services.GetRequiredService<IAmazonDynamoDB>();
+        var tables = await dynamoClient.ListTablesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        if (!tables.TableNames.Contains("AccountFeatureAggregates"))
+        {
+            await dynamoClient.CreateTableAsync(new CreateTableRequest
+            {
+                TableName = "AccountFeatureAggregates",
+                KeySchema = new List<KeySchemaElement>
+                {
+                    new KeySchemaElement("AccountId", KeyType.HASH),
+                    new KeySchemaElement("WindowBucket", KeyType.RANGE)
+                },
+                AttributeDefinitions = new List<AttributeDefinition>
+                {
+                    new AttributeDefinition("AccountId", ScalarAttributeType.S),
+                    new AttributeDefinition("WindowBucket", ScalarAttributeType.S)
+                },
+                ProvisionedThroughput = new ProvisionedThroughput(5, 5)
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+            logger.LogInformation("DynamoDB table 'AccountFeatureAggregates' successfully created.");
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("DynamoDB initialization note: {Message}", ex.Message);
     }
 }
 

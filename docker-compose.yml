@@ -36,9 +36,22 @@ services:
     networks:
       - finops-net
 
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: finops-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    restart: unless-stopped
+    networks:
+      - finops-net
+
 volumes:
   redis-data:
   sqlite-data: # Docker manages this externally, just like redis-data
+  dynamodb-data:
 
 networks:
   finops-net:

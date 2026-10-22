@@ -65,6 +65,9 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# Local secrets (contains API keys)
+appsettings.Development.json
+
 # Tye
 .tye/
 

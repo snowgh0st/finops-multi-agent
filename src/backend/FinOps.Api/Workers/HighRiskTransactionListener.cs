@@ -35,7 +35,8 @@ public class HighRiskTransactionListener : BackgroundService
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var featureStore = scope.ServiceProvider.GetRequiredService<TransactionFeatureStore>();
+                var featureStore = scope.ServiceProvider.GetRequiredService<TransactionFeatureStore>(); // Redis
+                var dynamoFeatureStore = scope.ServiceProvider.GetRequiredService<IFeatureStore>(); // DynamoDB
                 var evaluator = scope.ServiceProvider.GetRequiredService<FraudModelEvaluator>();
                 var multiAgentCoordinator = scope.ServiceProvider.GetRequiredService<MultiAgentRiskCoordinator>();
 
@@ -64,6 +65,20 @@ public class HighRiskTransactionListener : BackgroundService
                 );
 
                 anomalyScore = Math.Round(anomalyScore, 2);
+
+                // 4b. Track transaction in DynamoDB Persistent Feature Store.
+                // Runs on a background thread because the AWS SDK's first DynamoDB Local
+                // call can block synchronously (not just slowly), which would otherwise
+                // defeat an inline WaitAsync and stall this entire loop indefinitely.
+                try
+                {
+                    await Task.Run(() => dynamoFeatureStore.RecordTransactionAsync(accountId, amount, anomalyScore))
+                        .WaitAsync(TimeSpan.FromSeconds(5), stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("DynamoDB feature store write skipped due to connectivity: {Message}", ex.Message);
+                }
 
                 var sampleEvent = CreateSampleEvent(txId, accountId, amount, anomalyScore);
 
