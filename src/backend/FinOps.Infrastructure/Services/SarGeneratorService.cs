@@ -6,6 +6,19 @@ using Microsoft.SemanticKernel.ChatCompletion;
 
 namespace FinOps.Infrastructure.Services;
 
+// Alternate SAR-generation path: a single LLM agent, single turn, that relies
+// entirely on FraudInvestigationPlugin tool calls for its findings (no
+// metrics are handed to it directly in the prompt - contrast with
+// MultiAgentRiskCoordinator's three-turn flow, which passes metrics in the
+// prompt text AND allows optional tool calls on top).
+//
+// NOT CURRENTLY WIRED UP: this service is not registered in DI (Program.cs
+// only registers MultiAgentRiskCoordinator) and nothing calls
+// InvestigateAndGenerateSarAsync - the live pipeline uses
+// MultiAgentRiskCoordinator instead (triggered from
+// HighRiskTransactionListener). Keep this in mind before "fixing" this class;
+// changes here won't affect the running SAR flow unless something starts
+// invoking it.
 public class SarGeneratorService
 {
     private readonly Kernel _kernel;

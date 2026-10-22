@@ -1,5 +1,9 @@
 using Amazon.DynamoDBv2.DataModel;
 
+// One row per (AccountId, WindowBucket) - WindowBucket is a 1-minute-resolution
+// timestamp string ("yyyy-MM-dd-HH-mm"), so each row is a running total for that
+// single minute. Written/read by DynamoDbFeatureStore; see that file for how
+// this fits into the overall feature-store architecture.
 [DynamoDBTable("AccountFeatureAggregates")]
 public class AccountFeatureAggregate
 {

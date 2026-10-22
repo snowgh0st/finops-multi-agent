@@ -5,8 +5,8 @@ using FinOps.Infrastructure.Cache;
 using FinOps.Infrastructure.Evaluators;
 using FinOps.Infrastructure.Filters;
 using FinOps.Infrastructure.Persistence;
-using FinOps.Infrastructure.Services;
 using FinOps.Infrastructure.Agents;
+using FinOps.Core.Plugins;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
 using OpenTelemetry.Resources;
@@ -16,6 +16,12 @@ using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
 using Amazon.DynamoDBv2.Model;
 
+// Composition root for the FinOps Risk Engine API.
+// Wires together the full real-time fraud pipeline: Redis sliding-window feature
+// store -> ONNX fraud scoring -> Semantic Kernel multi-agent SAR investigation ->
+// SignalR push to the Angular dashboard -> SQLite compliance audit trail.
+// The actual pipeline execution lives in Workers/HighRiskTransactionListener.cs;
+// this file only registers the dependencies it needs.
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configure CORS for Angular Frontend
@@ -71,8 +77,15 @@ builder.Services.AddSingleton<FraudModelEvaluator>(sp =>
     return new FraudModelEvaluator(modelPath);
 });
 
-// 7. Register Semantic Kernel & Wire the Audit Function Filter
+// 7. Register Semantic Kernel, Audit Function Filter, and Plugins.
+// FraudInvestigationPlugin is now registered on the Kernel so MultiAgentRiskCoordinator's
+// agents have tool access (Redis velocity/geo lookups) instead of only reasoning over
+// pre-computed metrics. AuditFunctionFilter audits any plugin tool call the agents make.
+// NOTE: registering the plugin makes the tools *available* - the chat calls in
+// MultiAgentRiskCoordinator still need PromptExecutionSettings with
+// FunctionChoiceBehavior.Auto() for the model to actually invoke them (see that file).
 builder.Services.AddSingleton<IAutoFunctionInvocationFilter, AuditFunctionFilter>();
+builder.Services.AddScoped<FraudInvestigationPlugin>();
 
 builder.Services.AddTransient<Kernel>(sp =>
 {
@@ -88,6 +101,10 @@ builder.Services.AddTransient<Kernel>(sp =>
 
     kernelBuilder.AddOpenAIChatCompletion(modelId, apiKey, httpClient: customHttpClient);
 
+    // Register FraudInvestigationPlugin instance so agents can invoke its tools automatically
+    var fraudPlugin = sp.GetRequiredService<FraudInvestigationPlugin>();
+    kernelBuilder.Plugins.AddFromObject(fraudPlugin, "FraudInvestigation");
+
     var auditFilter = sp.GetRequiredService<IAutoFunctionInvocationFilter>();
     kernelBuilder.Services.AddSingleton(auditFilter);
 
@@ -97,19 +114,20 @@ builder.Services.AddTransient<Kernel>(sp =>
     return kernel;
 });
 
-// 8. Register Application & Background Services
-builder.Services.AddTransient<SarGeneratorService>();
+// 8. Register Application & Background Services.
+// HighRiskTransactionListener is the hosted background service that drives the
+// live pipeline end-to-end.
 builder.Services.AddHostedService<HighRiskTransactionListener>();
 
 // 9. Register Multi-Agent Coordinator Service
 builder.Services.AddTransient<MultiAgentRiskCoordinator>();
 
-// 10. Register Amazon DynamoDB client & Feature Store (MUST be before builder.Build())
+// 10. Register Amazon DynamoDB client & Feature Store (using host.docker.internal for local Docker stack; MUST be before builder.Build())
 builder.Services.AddSingleton<IAmazonDynamoDB>(sp =>
 {
     var config = new AmazonDynamoDBConfig
     {
-        ServiceURL = "http://dynamodb-local:8000",
+        ServiceURL = "http://host.docker.internal:8000",
         AuthenticationRegion = "us-east-1"
     };
     return new AmazonDynamoDBClient("local", "local", config);
@@ -181,7 +199,10 @@ app.UseRouting();
 // CORS must sit between UseRouting and endpoint mappings
 app.UseCors("AllowAngular");
 
-// Mapped route matches Angular's SignalR connection hub
+// Mapped route matches Angular's SignalR connection hub.
+// This only opens the WebSocket endpoint - the actual "ReceiveHighRiskAlert" /
+// "ReceiveSarReport" messages are pushed later from HighRiskTransactionListener
+// via IHubContext<RiskHub>, not from any method on the RiskHub class itself.
 app.MapHub<RiskHub>("/hubs/risk");
 
 app.MapGet("/", () => "FinOps Risk Engine API Running");

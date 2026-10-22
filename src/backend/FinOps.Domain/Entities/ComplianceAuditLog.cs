@@ -1,5 +1,11 @@
 namespace FinOps.Domain.Entities;
 
+// Append-only row in the SQLite compliance audit trail (see AuditDbContext).
+// Written by both AuditFunctionFilter (one row per SK tool call, EventType
+// "ToolInvocation") and MultiAgentRiskCoordinator (one row per agent turn,
+// EventType "AgentTurn" or "SarDecision"). This is the audit evidence that a
+// human/regulator would review to see what each agent said and why a SAR was
+// or wasn't filed for a given TransactionId.
 public class ComplianceAuditLog
 {
     public Guid Id { get; set; } = Guid.NewGuid();

@@ -3,6 +3,12 @@ namespace FinOps.Infrastructure.Cache;
 using FinOps.Core.Interfaces;
 using StackExchange.Redis;
 
+// Hot-path sliding-window velocity store backed by a single Redis sorted set
+// per account: key "account:{id}:velocity", member "{timestamp}:{amount}",
+// score = timestamp. Score-range queries give O(log N) window lookups without
+// a separate index. Window data lives only as long as Redis keeps it (no TTL
+// is set on the key itself) - entries older than 1 hour are pruned on every
+// write, which also caps unbounded growth for long-lived accounts.
 public class TransactionFeatureStore : ITransactionFeatureStore
 {
     private readonly IDatabase _redis;
@@ -37,6 +43,10 @@ public class TransactionFeatureStore : ITransactionFeatureStore
 
         foreach (var entry in entries)
         {
+            // Member format is "{timestamp}:{amount}" (see TrackTransactionAsync).
+            // Malformed/unparsable entries are silently skipped rather than
+            // thrown - a bad entry degrades the total instead of breaking the
+            // whole window query.
             var parts = entry.ToString().Split(':');
             if (parts.Length == 2 && double.TryParse(parts[1], out var amt))
             {

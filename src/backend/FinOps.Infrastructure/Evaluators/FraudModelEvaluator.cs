@@ -3,6 +3,15 @@ namespace FinOps.Infrastructure.Evaluators;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
+// Hot-path fraud scorer, registered as a singleton so the ONNX model loads once
+// and every scoring call reuses the same InferenceSession (<1ms per call).
+//
+// SAD PATH: if Models/fraud_model.onnx is missing, empty, or fails to load, this
+// class does NOT throw at startup - _session stays null and every call to
+// PredictRiskScore silently falls back to CalculateFallbackScore's hand-tuned
+// heuristic below. The app keeps running with heuristic-only scoring, which can
+// look like "fraud scores seem off" without any error in the logs - check
+// whether _session is null (i.e. whether the ONNX file actually exists) first.
 public class FraudModelEvaluator
 {
     private readonly InferenceSession? _session;
@@ -39,7 +48,11 @@ public class FraudModelEvaluator
 
         try
         {
-            // 2. Prepare ONNX Input Tensor
+            // 2. Prepare ONNX Input Tensor.
+            // Feature order here MUST match the order the model was trained on
+            // (amount, count60s, total60s, count1h, total1h, isGeoAnomaly) -
+            // reordering these without retraining the model will silently
+            // produce garbage scores, not an error.
             var inputData = new float[]
             {
                 (float)amount,

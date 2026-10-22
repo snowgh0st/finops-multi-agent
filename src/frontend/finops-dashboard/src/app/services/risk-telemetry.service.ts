@@ -21,6 +21,20 @@ export interface SarReport {
   generatedSarText: string;
 }
 
+export interface SarReportPayload {
+  transactionId: string;
+  accountId: string;
+  amount: number;
+  riskScore: number;
+  narrative: string;
+  timestamp: string;
+}
+
+// CUJ/Hot path: the SignalR client actually used by AppComponent (RiskHubService
+// in this same folder is a separate, unused/stale service - don't confuse the
+// two when debugging). Connects to the backend's RiskHub and reacts to the two
+// events HighRiskTransactionListener.cs pushes: "ReceiveHighRiskAlert" (every
+// ~4s) and "ReceiveSarReport" (only for anomaly scores >= 0.85).
 @Injectable({
   providedIn: 'root'
 })
@@ -71,6 +85,9 @@ export class RiskTelemetryService {
     this.hubConnection.on('ReceiveHighRiskAlert', (data: any) => {
       console.log('⚡ [SignalR] Raw Payload Received:', data);
 
+      // Backend sends camelCase (SignalR's JSON options force
+      // JsonNamingPolicy.CamelCase - see Program.cs), but this also checks
+      // PascalCase variants defensively in case that ever changes.
       const alert: TransactionAlert = {
         transactionId: data.transactionId ?? data.TransactionId ?? `TX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
         accountId: data.accountId ?? data.AccountId ?? 'ACC-UNKNOWN',
@@ -87,16 +104,20 @@ export class RiskTelemetryService {
       this.transactions.update((prev) => [alert, ...prev]);
     });
 
-    this.hubConnection.on('ReceiveSarReport', (reportText: string) => {
-      console.log('📄 [SignalR] SAR Report Received:', reportText);
-      this.activeSarReport.set({
-        transactionId: 'TX-HIGH-RISK',
-        accountId: 'ACC-SUSPECT',
-        amount: 125000.00,
-        riskScore: 0.89,
-        timestamp: new Date().toISOString(),
-        generatedSarText: reportText
-      });
+    // FIXED: Properly handle the structured SAR report object sent by HighRiskTransactionListener.cs
+    this.hubConnection.on('ReceiveSarReport', (data: any) => {
+      console.log('📄 [SignalR] SAR Report Received:', data);
+
+      const report: SarReport = {
+        transactionId: data.transactionId ?? data.TransactionId ?? 'TX-HIGH-RISK',
+        accountId: data.accountId ?? data.AccountId ?? 'ACC-SUSPECT',
+        amount: data.amount ?? data.Amount ?? 0,
+        riskScore: data.riskScore ?? data.RiskScore ?? 0,
+        timestamp: data.timestamp ?? data.Timestamp ?? new Date().toISOString(),
+        generatedSarText: data.generatedSarText ?? data.GeneratedSarText ?? data.narrative ?? data.Narrative ?? String(data)
+      };
+
+      this.activeSarReport.set(report);
       this.isSarModalOpen.set(true);
     });
   }

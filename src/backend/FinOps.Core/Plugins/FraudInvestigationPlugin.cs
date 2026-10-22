@@ -4,6 +4,13 @@ using System.ComponentModel;
 using FinOps.Core.Interfaces;
 using Microsoft.SemanticKernel;
 
+// Semantic Kernel plugin exposing the Redis feature store as LLM-callable tools
+// (GetAccountVelocityAsync, CheckGeoAnomalyAsync). Registered on the shared
+// Kernel in Program.cs, so both the live pipeline (MultiAgentRiskCoordinator,
+// which enables FunctionChoiceBehavior.Auto() on each agent turn) and the
+// unused alternate path (SarGeneratorService) can have the model invoke these
+// tools - though invocation is model-decided, not guaranteed, on every call.
+// Every actual tool call is audited by AuditFunctionFilter.
 public class FraudInvestigationPlugin
 {
     private readonly ITransactionFeatureStore _featureStore;

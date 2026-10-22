@@ -8,6 +8,15 @@ using Microsoft.SemanticKernel;
 
 namespace FinOps.Infrastructure.Filters;
 
+// Semantic Kernel middleware that wraps every automatic plugin-function call
+// (IAutoFunctionInvocationFilter) and writes a ComplianceAuditLog row for it,
+// via OnAutoFunctionInvocationAsync below. Registered globally in Program.cs,
+// but only fires when the Kernel actually invokes a plugin function - today
+// that only happens via SarGeneratorService + FraudInvestigationPlugin, which
+// is not on the live pipeline (see SarGeneratorService.cs). The live pipeline's
+// MultiAgentRiskCoordinator audits its own turns directly instead of going
+// through this filter. Re-throws on failure so a broken tool call isn't
+// silently swallowed by the audit layer.
 public class AuditFunctionFilter : IAutoFunctionInvocationFilter
 {
     private readonly IServiceProvider _serviceProvider;

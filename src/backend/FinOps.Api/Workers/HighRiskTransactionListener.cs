@@ -10,6 +10,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+// CORE HOT PATH: this background service is the heart of the demo/CUJ.
+// Every ~4 seconds it synthesizes one sample transaction, scores it, persists
+// features, and pushes it to every connected dashboard client. There is no
+// real transaction ingestion (no queue, no API endpoint) - ExecuteAsync below
+// is both the producer and the processor. If the dashboard looks "frozen",
+// check this loop and the SignalR connection first.
 public class HighRiskTransactionListener : BackgroundService
 {
     private readonly IHubContext<RiskHub> _hubContext;
@@ -94,7 +100,11 @@ public class HighRiskTransactionListener : BackgroundService
                     sampleEvent.AnomalyScore,
                     count60s);
 
-                // 6. Trigger Multi-Agent Risk Coordinator pipeline for extreme risk anomalies (>= 0.85)
+                // 6. Trigger Multi-Agent Risk Coordinator pipeline for extreme risk anomalies (>= 0.85).
+                // This 0.85 threshold is the CUJ branch point between "just show an
+                // alert" and "run the full LLM investigation + SAR report" - the
+                // expensive/slow path. It is independent of the 0.75 IsHighRisk flag
+                // set in CreateSampleEvent, which only affects dashboard styling.
                 if (sampleEvent.AnomalyScore >= 0.85)
                 {
                     _logger.LogWarning("Extreme risk detected ({Score}). Initiating Multi-Agent Risk Coordinator investigation...", sampleEvent.AnomalyScore);
@@ -130,6 +140,10 @@ public class HighRiskTransactionListener : BackgroundService
             }
             catch (Exception ex)
             {
+                // SAD PATH: any unexpected failure (Redis down, DynamoDB unreachable,
+                // OpenAI call throwing, etc.) is swallowed here so one bad iteration
+                // doesn't kill the whole background service. The loop logs and
+                // retries after a longer back-off instead of crashing the worker.
                 _logger.LogError(ex, "Error in HighRiskTransactionListener loop.");
                 await Task.Delay(5000, stoppingToken);
             }

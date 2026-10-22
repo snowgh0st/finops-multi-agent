@@ -16,6 +16,10 @@ export interface SarReport {
   imports: [CommonModule],
   templateUrl: './sar-modal.component.html',
 })
+// CUJ: modal shown when the backend's multi-agent investigation produces a SAR
+// report (see RiskTelemetryService's 'ReceiveSarReport' handler, which drives
+// the `report`/`isOpen` inputs). Purely presentational - all state/fetching
+// lives in RiskTelemetryService.
 export class SarModalComponent {
   // Signal inputs & outputs (Angular 18 modern syntax)
   report = input<SarReport | null>(null);
@@ -24,7 +28,10 @@ export class SarModalComponent {
 
   copied = signal<boolean>(false);
 
-  // Formatted risk badge helper
+  // Formatted risk badge helper.
+  // Thresholds are presentational only and don't need to match the backend's
+  // 0.75 (IsHighRisk) / 0.85 (SAR investigation trigger) thresholds exactly,
+  // but keep them in mind when a risk score's color looks "wrong".
   riskSeverityClass = computed(() => {
     const score = this.report()?.riskScore ?? 0;
     if (score >= 0.85) return 'bg-red-500/10 text-red-400 border-red-500/30';

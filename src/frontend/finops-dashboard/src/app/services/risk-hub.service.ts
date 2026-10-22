@@ -11,6 +11,14 @@ export interface RiskAlert {
   agentSummary?: string;
 }
 
+// NOT USED: no component injects RiskHubService (AppComponent uses
+// RiskTelemetryService instead). It also listens for 'ReceiveRiskAlert' and
+// 'ReceiveAgentUpdate', but the backend (HighRiskTransactionListener.cs) only
+// ever emits 'ReceiveHighRiskAlert' and 'ReceiveSarReport' - so even if this
+// were wired up, these handlers would never fire. Looks like an earlier/
+// abandoned version of the telemetry service; kept here but dead. If "nothing
+// happens" when debugging a SignalR issue, confirm which service is actually
+// in use before investigating this file.
 @Injectable({
   providedIn: 'root'
 })

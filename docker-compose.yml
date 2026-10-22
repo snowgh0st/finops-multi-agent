@@ -26,6 +26,11 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__Redis=redis:6379
+      # Must come from a local .env / shell env var named OPENAI_API_KEY.
+      # If unset, MultiAgentRiskCoordinator's chat calls will fail at runtime
+      # (not at container start) the first time a transaction scores >= 0.85 -
+      # check this first if SAR investigations error out but everything else
+      # (scoring, dashboard alerts) works fine.
       - OpenAI__ApiKey=${OPENAI_API_KEY}
       - OpenAI__ModelId=gpt-4o
     volumes:
@@ -36,6 +41,10 @@ services:
     networks:
       - finops-net
 
+  # Note: finops-api does not depend_on dynamodb-local. This is intentional -
+  # DynamoDbFeatureStore writes are wrapped in a timeout + swallowed exception
+  # in HighRiskTransactionListener.cs, so the live scoring/dashboard pipeline
+  # keeps working even if this container is slow to start or unavailable.
   dynamodb-local:
     image: amazon/dynamodb-local:latest
     container_name: finops-dynamodb
